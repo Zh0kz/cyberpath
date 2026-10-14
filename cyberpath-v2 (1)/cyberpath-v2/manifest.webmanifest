@@ -1,0 +1,14 @@
+{
+  "name":"CyberPath V2 Training Core",
+  "short_name":"CyberPath",
+  "start_url":"./",
+  "scope":"./",
+  "display":"standalone",
+  "background_color":"#030806",
+  "theme_color":"#06100c",
+  "description":"Offline cybersecurity training RPG with mastery, labs, reviews and boss exams.",
+  "icons":[
+    {"src":"assets/icon-192.png","sizes":"192x192","type":"image/png"},
+    {"src":"assets/icon-512.png","sizes":"512x512","type":"image/png"}
+  ]
+}
