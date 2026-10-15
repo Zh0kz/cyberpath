@@ -4,6 +4,9 @@
   const { MODULES, MISSIONS, REVIEW_BANK, BOSSES, PLACEMENT, GLOSSARY, ACHIEVEMENTS } = window.CYBER_DATA;
   const STORAGE_KEY = 'cyberpath:v2:state';
   const V1_KEY = 'cyberpath:v1:state';
+  const AI_CONFIG_KEY = 'cyberpath:v2:ai-config';
+  const AI_KEY_LOCAL = 'cyberpath:v2:openrouter-key';
+  const AI_KEY_SESSION = 'cyberpath:v2:openrouter-key-session';
   const DAILY_GOAL = 25;
   const REVIEW_INTERVALS = [1,3,7,14,30];
   const BOSS_MASTERY_REQ = {
@@ -40,6 +43,8 @@
     mastery: {},
     bosses: [],
     bossHints: {},
+    missionHints: {},
+    missionAttempts: {},
     mistakes: {},
     review: {},
     reviewCorrect: 0,
@@ -82,6 +87,8 @@
     s.mastery = s.mastery && typeof s.mastery==='object' ? s.mastery : {};
     s.bosses = Array.isArray(s.bosses) ? s.bosses : [];
     s.bossHints = s.bossHints && typeof s.bossHints==='object' ? s.bossHints : {};
+    s.missionHints = s.missionHints && typeof s.missionHints==='object' ? s.missionHints : {};
+    s.missionAttempts = s.missionAttempts && typeof s.missionAttempts==='object' ? s.missionAttempts : {};
     s.mistakes = s.mistakes && typeof s.mistakes==='object' ? s.mistakes : {};
     s.review = s.review && typeof s.review==='object' ? s.review : {};
     s.notes = s.notes && typeof s.notes==='object' ? s.notes : {};
@@ -98,6 +105,148 @@
 
   function saveState(){
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  const RESOURCE_LIBRARY = {
+    foundations:[
+      ['MDN: Network Monitor','https://developer.mozilla.org/en-US/docs/Tools/Network_Monitor'],
+      ['Microsoft: Windows commands','https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/windows-commands']
+    ],
+    networking:[
+      ['Cloudflare Learning: Networking','https://www.cloudflare.com/learning/network-layer/what-is-a-computer-port/'],
+      ['Cloudflare Learning: DNS','https://www.cloudflare.com/learning/dns/what-is-dns/']
+    ],
+    linux:[
+      ['Linux man-pages','https://man7.org/linux/man-pages/'],
+      ['GNU Coreutils manual','https://www.gnu.org/software/coreutils/manual/coreutils.html']
+    ],
+    recon:[
+      ['Nmap Reference Guide','https://nmap.org/book/man.html'],
+      ['Nmap Book: Host Discovery','https://nmap.org/book/man-host-discovery.html']
+    ],
+    web:[
+      ['MDN: HTTP overview','https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview'],
+      ['PortSwigger: HTTP basics','https://portswigger.net/web-security/learning-paths']
+    ],
+    websec:[
+      ['PortSwigger Web Security Academy','https://portswigger.net/web-security'],
+      ['OWASP Web Security Testing Guide','https://owasp.org/www-project-web-security-testing-guide/']
+    ],
+    privesc:[
+      ['Linux sudo manual','https://man7.org/linux/man-pages/man8/sudo.8.html'],
+      ['Linux permissions (chmod)','https://man7.org/linux/man-pages/man1/chmod.1.html']
+    ],
+    pentest:[
+      ['OWASP Web Security Testing Guide','https://owasp.org/www-project-web-security-testing-guide/'],
+      ['NIST Technical Guide to Security Testing','https://csrc.nist.gov/publications/detail/sp/800-115/final']
+    ]
+  };
+
+  function missionResources(m){
+    const out=[];
+    if(m.resource) out.push(['Mission training resource',m.resource]);
+    for(const x of (RESOURCE_LIBRARY[m.module]||[])) if(!out.some(y=>y[1]===x[1])) out.push(x);
+    return out.slice(0,3);
+  }
+
+  function loadAiConfig(){
+    let cfg={model:'openrouter/free',remember:false,aiGrading:true,freeOnly:true};
+    try{ cfg={...cfg,...JSON.parse(localStorage.getItem(AI_CONFIG_KEY)||'{}')}; }catch{}
+    return cfg;
+  }
+  let aiConfig=loadAiConfig();
+  function getAiKey(){ return sessionStorage.getItem(AI_KEY_SESSION)||localStorage.getItem(AI_KEY_LOCAL)||''; }
+  function setAiKey(key,remember){
+    sessionStorage.removeItem(AI_KEY_SESSION); localStorage.removeItem(AI_KEY_LOCAL);
+    if(!key) return;
+    if(remember) localStorage.setItem(AI_KEY_LOCAL,key); else sessionStorage.setItem(AI_KEY_SESSION,key);
+  }
+  function saveAiConfig(){ localStorage.setItem(AI_CONFIG_KEY,JSON.stringify(aiConfig)); renderAiStatus(); }
+  function aiReady(){ return !!getAiKey(); }
+  function renderAiStatus(){
+    const b=document.getElementById('aiBtn'); if(b){b.classList.toggle('ai-ready',aiReady());b.title=aiReady()?'AI Coach connected':'Configure AI Coach';}
+    const s=document.getElementById('aiStatusText'); if(s)s.textContent=aiReady()?`Connected • ${aiConfig.freeOnly!==false?'openrouter/free':aiConfig.model}`:'Not configured';
+  }
+  async function callOpenRouter(messages,{maxTokens=350,temperature=.25}={}){
+    const key=getAiKey(); if(!key) throw new Error('OpenRouter API key is not configured.');
+    const res=await fetch('https://openrouter.ai/api/v1/chat/completions',{
+      method:'POST',
+      headers:{
+        'Authorization':`Bearer ${key}`,
+        'Content-Type':'application/json',
+        'HTTP-Referer':location.origin,
+        'X-OpenRouter-Title':'CyberPath'
+      },
+      body:JSON.stringify({model:aiConfig.freeOnly!==false?'openrouter/free':(aiConfig.model||'openrouter/free'),messages,temperature,max_tokens:maxTokens})
+    });
+    let data={}; try{data=await res.json();}catch{}
+    if(!res.ok) throw new Error(data?.error?.message||`OpenRouter error ${res.status}`);
+    const text=data?.choices?.[0]?.message?.content;
+    if(!text) throw new Error('AI returned an empty response.');
+    return String(text).trim();
+  }
+  function cyberCoachSystem(mode='coach'){
+    return `You are CyberPath AI Coach, a concise cybersecurity tutor for a beginner. Reply primarily in Russian, keeping English technical terms when useful. The learner may only practice on their own devices, CTFs, intentionally vulnerable labs, or explicitly authorized systems. Never encourage testing random real targets. In HINT mode never reveal the final answer, exact MCQ choice, flag, password, full command answer, exploit payload, or complete solution; give one progressive conceptual clue only. In GRADING mode evaluate understanding rather than exact wording and do not reveal the full correct answer when the response is wrong. Mode: ${mode}.`;
+  }
+  function missionQuestionText(m){
+    const c=m.check||{};
+    if(c.kind==='mcq') return `${c.question}\nOptions: ${(c.options||[]).map((x,i)=>`${i+1}) ${x}`).join(' | ')}`;
+    return c.question||'Complete the mission.';
+  }
+  async function requestAiHint(m,root){
+    const btn=root.querySelector('[data-ai-hint]'); const box=root.querySelector('[data-hints-area]');
+    if(!aiReady()){openAiDialog();toast('Add your OpenRouter key first');return;}
+    if(btn){btn.disabled=true;btn.textContent='AI thinking…';}
+    try{
+      const answer=(root.querySelector('[data-answer]')?.value||root.querySelector('input[name="missionAnswer"]:checked')?.nextElementSibling?.textContent||'').trim();
+      const used=Number(state.missionHints[m.id]||0);
+      const text=await callOpenRouter([
+        {role:'system',content:cyberCoachSystem('HINT')},
+        {role:'user',content:`Mission: ${m.title}\nSkill: ${skillName(m.skill)}\nBriefing: ${m.briefing}\nQuestion: ${missionQuestionText(m)}\nLearner answer so far: ${answer||'(none)'}\nHint number: ${used+1}. Give exactly one useful hint without stating the answer.`}
+      ],{maxTokens:180,temperature:.2});
+      state.missionHints[m.id]=used+1; saveState();
+      const h=document.createElement('div');h.className='hint-box ai-hint';h.innerHTML=`<b>✨ AI Hint ${used+1}</b><br>${escapeHtml(text)}`;box.appendChild(h);
+      updateHintButtons(m,root);
+    }catch(e){const h=document.createElement('div');h.className='check-result bad';h.textContent=`AI unavailable: ${e.message}`;box.appendChild(h);}
+    finally{if(btn){btn.disabled=false;btn.textContent='✨ AI hint';}}
+  }
+  function extractJson(text){
+    const clean=String(text).replace(/```json/gi,'').replace(/```/g,'').trim();
+    const a=clean.indexOf('{'),b=clean.lastIndexOf('}');
+    if(a<0||b<a) return null;
+    try{return JSON.parse(clean.slice(a,b+1));}catch{return null;}
+  }
+  async function aiGradeMission(m,root){
+    if(!aiReady()||!aiConfig.aiGrading||!['explain','report','keywords'].includes(m.check?.kind)) return null;
+    const val=String(root.querySelector('[data-answer]')?.value||'').trim(); if(!val)return null;
+    try{
+      showInlineCheck(root,'✨ AI Coach проверяет смысл ответа…',true);
+      const raw=await callOpenRouter([
+        {role:'system',content:cyberCoachSystem('GRADING')+' Return ONLY JSON: {"pass":boolean,"score":0-100,"feedback":"short feedback","next_hint":"one clue without the final answer"}.'},
+        {role:'user',content:`Mission: ${m.title}\nSkill: ${skillName(m.skill)}\nBriefing: ${m.briefing}\nQuestion: ${missionQuestionText(m)}\nLearner response:\n${val}\nEvaluate whether the learner demonstrates the required concept. Do not demand exact wording.`}
+      ],{maxTokens:260,temperature:.1});
+      const j=extractJson(raw); if(!j) throw new Error('Could not parse AI grading response.');
+      return {ok:!!j.pass,msg:`AI: ${String(j.feedback||'Response reviewed.')}`,hint:String(j.next_hint||''),score:Number(j.score)||0};
+    }catch(e){return {fallback:true,error:e.message};}
+  }
+  async function askGeneralCoach(){
+    const q=document.getElementById('aiCoachQuestion')?.value?.trim(); const out=document.getElementById('aiCoachOutput');
+    if(!q){toast('Write a question first');return;} if(!aiReady()){toast('Save an API key first');return;}
+    out.innerHTML='<div class="ai-loading">Thinking…</div>';
+    try{
+      const text=await callOpenRouter([{role:'system',content:cyberCoachSystem('COACH')},{role:'user',content:q}],{maxTokens:500,temperature:.25});
+      out.innerHTML=`<div class="ai-answer">${escapeHtml(text).replace(/\n/g,'<br>')}</div>`;
+    }catch(e){out.innerHTML=`<div class="check-result bad">${escapeHtml(e.message)}</div>`;}
+  }
+  function openAiDialog(){
+    const d=document.getElementById('aiDialog');
+    document.getElementById('aiKeyInput').value=getAiKey();
+    document.getElementById('aiModelInput').value=aiConfig.model||'openrouter/free';
+    document.getElementById('aiFreeOnly').checked=aiConfig.freeOnly!==false;
+    document.getElementById('aiModelInput').disabled=aiConfig.freeOnly!==false;
+    document.getElementById('aiRemember').checked=!!aiConfig.remember;
+    document.getElementById('aiGrading').checked=aiConfig.aiGrading!==false;
+    renderAiStatus(); d.showModal();
   }
 
   function localDate(d=new Date()){
@@ -252,14 +401,22 @@
     addReviewCardForSkill(m.skill,dateOffset(new Date(),1));
   }
 
-  function completeMission(m,root){
+  async function completeMission(m,root){
     if(missionDone(m.id)){ toast('Mission already completed'); return; }
-    const result=checkMissionAnswer(m,root);
+    state.missionAttempts[m.id]=(state.missionAttempts[m.id]||0)+1;
+    let result=checkMissionAnswer(m,root);
+    if(result.ok){
+      const aiResult=await aiGradeMission(m,root);
+      if(aiResult && !aiResult.fallback) result=aiResult;
+      else if(aiResult?.fallback) toast(`AI grading fallback: ${aiResult.error}`);
+    }
     if(!result.ok){
       recordAnswer(m.skill,false);
       addReviewCardForSkill(m.skill,today());
       saveState();
-      showInlineCheck(root,result.msg,false);
+      showInlineCheck(root,result.msg||'Пока нет. Попробуй ещё раз.',false);
+      if(result.hint){const box=root.querySelector('[data-hints-area]');const h=document.createElement('div');h.className='hint-box ai-hint';h.innerHTML=`<b>✨ AI feedback hint</b><br>${escapeHtml(result.hint)}`;box?.appendChild(h);}
+      updateHintButtons(m,root);
       renderWeakSkills();
       return;
     }
@@ -268,7 +425,9 @@
     const study=Math.min(m.duration,Math.max(1,focusSeconds?Math.round(focusSeconds/60):elapsed));
     state.completed.push({id:m.id,date:today(),xp:m.xp,module:m.module,skill:m.skill,type:m.type});
     addXp(m.xp);
-    const masteryGain=m.mastery*3;
+    const usedHints=Number(state.missionHints[m.id]||0);
+    const hintMultiplier=usedHints===0?1:usedHints===1?.85:usedHints===2?.7:.55;
+    const masteryGain=Math.max(1,Math.round(m.mastery*3*hintMultiplier));
     addMastery(m.skill,masteryGain);
     addStudy(study);
     scheduleReviewsForMission(m);
@@ -276,7 +435,8 @@
     if(note) state.notes[m.id]=note;
     saveState();
     stopMissionTimer();
-    showInlineCheck(root,`Mission complete • +${m.xp} XP • +${masteryGain} mastery`,true);
+    showInlineCheck(root,`Mission complete • +${m.xp} XP • +${masteryGain} mastery${usedHints?` • ${usedHints} hint(s) used`:''}`,true);
+    revealStudyNotes(m,root,true);
     const btn=root.querySelector('[data-complete-mission]'); if(btn){btn.disabled=true;btn.textContent='Completed ✓';}
     renderAll();
     toast(`+${m.xp} XP • ${skillName(m.skill)} +${masteryGain} mastery`);
@@ -325,6 +485,37 @@
     return `<h4>${escapeHtml(c.question)}</h4><textarea class="answer-input" data-answer rows="${rows}" placeholder="Твой ответ..."></textarea>`;
   }
 
+  function localHintText(m,level){
+    if(level<=0) return `Сфокусируйся на навыке «${skillName(m.skill)}» и на ключевых словах вопроса. Не ищи точное совпадение — восстанови идею своими словами.`;
+    const item=m.body?.[Math.min(level-1,(m.body?.length||1)-1)];
+    return item||'Разбей вопрос на маленькие части и исключи варианты, которые относятся к другому уровню/протоколу.';
+  }
+  function addLocalHint(m,root){
+    const used=Number(state.missionHints[m.id]||0);
+    state.missionHints[m.id]=used+1; saveState();
+    const box=root.querySelector('[data-hints-area]'); const h=document.createElement('div');h.className='hint-box';h.innerHTML=`<b>Hint ${used+1}</b><br>${escapeHtml(localHintText(m,used))}`;box?.appendChild(h);
+    updateHintButtons(m,root);
+  }
+  function revealStudyNotes(m,root,completed=false){
+    const notes=root.querySelector('[data-study-notes]'); if(!notes)return;
+    notes.classList.remove('hidden');
+    notes.innerHTML=`<div class="learning-box"><div class="learning-label">${completed?'POST-MISSION NOTES':'STUDY NOTES'}</div><ul>${(m.body||[]).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>`;
+    const sb=root.querySelector('[data-show-notes]'); if(sb)sb.classList.add('hidden');
+  }
+  function updateHintButtons(m,root){
+    const attempts=Number(state.missionAttempts[m.id]||0),hints=Number(state.missionHints[m.id]||0);
+    const meta=root.querySelector('[data-hint-meta]');if(meta)meta.textContent=`Hints used: ${hints} • Attempts: ${attempts}`;
+    const show=root.querySelector('[data-show-notes]'); if(show)show.classList.toggle('hidden',attempts<2&&hints<2);
+  }
+  function renderResources(m){
+    const list=missionResources(m); if(!list.length)return '';
+    return `<div class="resource-panel"><div class="learning-label">LEARN MORE</div>${list.map(([name,url])=>`<a class="resource-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(name)} ↗</a>`).join('')}</div>`;
+  }
+  function renderGuidance(m,reviewOnly){
+    if(reviewOnly||m.type==='learn') return `<div data-study-notes><div class="learning-box"><div class="learning-label">${reviewOnly?'REVIEW NOTES':'LEARNING NOTES'}</div><ul>${(m.body||[]).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div></div>`;
+    return `<div class="guidance-shell"><div class="guidance-head"><div><div class="learning-label">HINT SYSTEM</div><p class="muted">Study notes are hidden so the question does not reveal its own answer.</p></div><span class="chip" data-hint-meta>Hints used: ${Number(state.missionHints[m.id]||0)} • Attempts: ${Number(state.missionAttempts[m.id]||0)}</span></div><div data-hints-area class="hints-area"></div><div class="button-row hint-actions"><button type="button" class="secondary-btn" data-local-hint>Hint</button><button type="button" class="secondary-btn ai-btn-inline" data-ai-hint>✨ AI hint</button><button type="button" class="text-btn hidden" data-show-notes>Show study notes</button></div><div data-study-notes class="hidden"></div></div>`;
+  }
+
   function openMission(m,reviewOnly=false){
     stopMissionTimer();
     const content=document.getElementById('missionDialogContent');
@@ -332,16 +523,20 @@
     content.innerHTML=`
       <p class="muted tiny">${reviewOnly?'MISSION REVIEW':'MISSION BRIEFING'} • ${escapeHtml(moduleById(m.module)?.title||m.module)}</p>
       <h2>${escapeHtml(m.title)}</h2>
-      <div class="quest-meta"><span class="tag type-tag">${missionTypeLabel(m.type)}</span><span class="tag">${escapeHtml(skillName(m.skill))}</span><span class="tag xp-tag">+${m.xp} XP</span><span class="tag">≈ ${m.duration} min</span></div>
+      <div class="quest-meta"><span class="tag type-tag">${missionTypeLabel(m.type)}</span><span class="tag">${escapeHtml(skillName(m.skill))}</span><span class="tag xp-tag">+${m.xp} XP</span><span class="tag">≈ ${m.duration} min</span>${aiReady()?'<span class="tag ai-tag">✨ AI ready</span>':''}</div>
       <div class="mission-brief"><p>${escapeHtml(m.briefing)}</p></div>
-      <div class="learning-box"><ul>${m.body.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>
-      ${m.resource?`<a class="resource-link" href="${escapeHtml(m.resource)}" target="_blank" rel="noopener noreferrer">Open official training resource ↗</a>`:''}
+      ${renderGuidance(m,reviewOnly)}
+      ${renderResources(m)}
       <div class="timer-row"><span class="muted">Focus timer</span><span class="focus-timer" data-focus-timer>00:00</span></div>
       <div class="mission-check">${reviewOnly?'<div class="check-result good">Mission already completed. Use this screen as a refresher.</div>':renderMissionCheck(m)}</div>
-      <label class="field-label" style="margin-top:14px">Mission note<textarea data-mission-note rows="4" placeholder="Что запомнить? Не сохраняй passwords/tokens.">${escapeHtml(savedNote)}</textarea></label>
+      <label class="field-label" style="margin-top:14px">Mission note<textarea data-mission-note rows="4" placeholder="Что запомнить? Не сохраняй passwords/tokens/API keys.">${escapeHtml(savedNote)}</textarea></label>
       <div class="button-row" style="margin-top:10px"><button type="button" class="secondary-btn" data-save-note>Save note</button>${reviewOnly?'':`<button type="button" class="primary-btn" data-complete-mission>Verify & complete</button>`}</div>`;
     content.querySelector('[data-save-note]').onclick=()=>{state.notes[m.id]=content.querySelector('[data-mission-note]').value.trim();saveState();renderStats();toast('Note saved');};
+    content.querySelector('[data-local-hint]')?.addEventListener('click',()=>addLocalHint(m,content));
+    content.querySelector('[data-ai-hint]')?.addEventListener('click',()=>requestAiHint(m,content));
+    content.querySelector('[data-show-notes]')?.addEventListener('click',()=>{state.missionHints[m.id]=(state.missionHints[m.id]||0)+1;saveState();revealStudyNotes(m,content,false);updateHintButtons(m,content);});
     const complete=content.querySelector('[data-complete-mission]'); if(complete) complete.onclick=()=>completeMission(m,content);
+    updateHintButtons(m,content);
     document.getElementById('missionDialog').showModal();
     if(!reviewOnly) startMissionTimer(); else {missionOpenedAt=null;focusSeconds=0;}
   }
@@ -440,17 +635,25 @@
     return candidates[Math.floor(Math.random()*candidates.length)]||null;
   }
 
-  function renderReview(cardOverride=null){
+  function renderReview(){
     const due=getDueReviewCards();document.getElementById('reviewDueChip').textContent=`${due.length} due`;
     const area=document.getElementById('reviewArea');area.innerHTML='';
-    const card=cardOverride||due[0];
+    let card=due[0];
     if(!card){
       area.innerHTML='<div class="review-empty"><div style="font-size:35px">🧠</div><h3>No reviews due</h3><p class="muted">Это хорошо: сегодня память ничего не требует. Можно сделать добровольную practice card.</p><button id="practiceReviewBtn" class="secondary-btn">Practice one card</button></div>';
-      area.querySelector('#practiceReviewBtn').onclick=()=>{const p=practiceReviewCard();if(p)renderReview(p);else toast('Сначала открой учебный модуль');};
-      return;
+      document.getElementById('practiceReviewBtn').onclick=()=>{const pool=REVIEW_BANK.filter(r=>moduleUnlocked(r.module));if(pool.length)renderReviewCard(pool[Math.floor(Math.random()*pool.length)],false);};return;
     }
-    const scheduled=!!state.review[card.id];
-    area.innerHTML=`<div class="review-question"><p class="muted tiny">${scheduled?'DUE REVIEW':'PRACTICE'} • ${escapeHtml(skillName(card.skill))}</p><h3>${escapeHtml(card.q)}</h3>${card.options.map((o,i)=>`<label class="option"><input type="radio" name="reviewAnswer" value="${i}"><span>${escapeHtml(o)}</span></label>`).join('')}<div id="reviewResult"></div><button id="submitReview" class="primary-btn full">Check answer</button></div>`;
+    renderReviewCard(card,true);
+  }
+  function renderReviewCard(card,scheduled){
+    const area=document.getElementById('reviewArea'); let attempts=0;
+    area.innerHTML=`<div class="review-question"><p class="muted tiny">${scheduled?'DUE REVIEW':'PRACTICE'} • ${escapeHtml(skillName(card.skill))}</p><h3>${escapeHtml(card.q)}</h3>${card.options.map((o,i)=>`<label class="option"><input type="radio" name="reviewAnswer" value="${i}"><span>${escapeHtml(o)}</span></label>`).join('')}<div id="reviewHint"></div><div id="reviewResult"></div><div class="button-row"><button id="submitReview" class="primary-btn">Check answer</button><button id="reviewHintBtn" class="secondary-btn" type="button">Hint</button><button id="showReviewAnswer" class="text-btn hidden" type="button">Show answer</button></div></div>`;
+    const hint=()=>{
+      const correct=card.options[card.correct];const clue=correct.length<=3?`Правильный вариант связан с базовым определением навыка «${skillName(card.skill)}».`:`Правильный вариант начинается с «${correct.slice(0,1)}» и относится к «${skillName(card.skill)}».`;
+      area.querySelector('#reviewHint').innerHTML=`<div class="hint-box">${escapeHtml(clue)}</div>`;
+    };
+    area.querySelector('#reviewHintBtn').onclick=hint;
+    area.querySelector('#showReviewAnswer').onclick=()=>{area.querySelector('#reviewResult').innerHTML=`<div class="review-result bad">Ответ: <b>${escapeHtml(card.options[card.correct])}</b>. Карточка вернётся завтра.</div>`;if(scheduled){const r=state.review[card.id]||{stage:0};r.stage=0;r.due=dateOffset(new Date(),1);r.last=today();state.review[card.id]=r;}saveState();};
     area.querySelector('#submitReview').onclick=()=>{
       const checked=area.querySelector('input[name="reviewAnswer"]:checked');if(!checked){toast('Выбери ответ');return;}
       const ok=Number(checked.value)===card.correct;recordAnswer(card.skill,ok);
@@ -458,14 +661,15 @@
         state.reviewCorrect++;addMastery(card.skill,1);
         if(scheduled){const r=state.review[card.id];r.stage=Math.min(REVIEW_INTERVALS.length-1,(r.stage||0)+1);r.due=dateOffset(new Date(),REVIEW_INTERVALS[r.stage]);r.last=today();}
         area.querySelector('#reviewResult').innerHTML='<div class="review-result good">✓ Верно. Карточка уйдёт дальше по интервалу.</div>';
+        saveState();renderStats();renderWeakSkills();setTimeout(renderReview,750);
       }else{
-        state.reviewWrong++;
+        attempts++;state.reviewWrong++;
         if(!state.review[card.id])state.review[card.id]={stage:0,due:dateOffset(new Date(),1),last:today()};
         else{state.review[card.id].stage=0;state.review[card.id].due=dateOffset(new Date(),1);state.review[card.id].last=today();}
-        area.querySelector('#reviewResult').innerHTML=`<div class="review-result bad">Неверно. Правильный ответ: <b>${escapeHtml(card.options[card.correct])}</b>. Вернём карточку завтра.</div>`;
+        area.querySelector('#reviewResult').innerHTML=`<div class="review-result bad">Пока нет. Ответ не показываю — сначала попробуй ещё раз или возьми hint.</div>`;
+        if(attempts>=2)area.querySelector('#showReviewAnswer').classList.remove('hidden');
+        saveState();renderStats();renderWeakSkills();
       }
-      saveState();renderStats();renderWeakSkills();
-      const btn=area.querySelector('#submitReview');btn.textContent='Next card';btn.onclick=()=>renderReview();
     };
   }
 
@@ -601,7 +805,7 @@
   }
 
   function renderAll(){
-    renderDashboard();renderMissions();renderRoadmap();renderReview();renderBosses();renderJournal();renderStats();
+    renderDashboard();renderMissions();renderRoadmap();renderReview();renderBosses();renderJournal();renderStats();renderAiStatus();
     document.getElementById('profileBtn').textContent=(state.playerName||'CP').split(/\s+/).map(x=>x[0]).join('').slice(0,2).toUpperCase()||'CP';
   }
 
@@ -610,6 +814,11 @@
     document.querySelectorAll('.tab-btn').forEach(b=>b.onclick=()=>{currentJournalTab=b.dataset.jtab;renderJournal();});
     document.getElementById('glossarySearch').addEventListener('input',renderGlossary);
     document.getElementById('placementBtn').onclick=renderPlacement;
+    document.getElementById('aiBtn').onclick=openAiDialog;
+    document.getElementById('saveAiBtn').onclick=()=>{const key=document.getElementById('aiKeyInput').value.trim();aiConfig.freeOnly=document.getElementById('aiFreeOnly').checked;aiConfig.model=aiConfig.freeOnly?'openrouter/free':(document.getElementById('aiModelInput').value.trim()||'openrouter/free');aiConfig.remember=document.getElementById('aiRemember').checked;aiConfig.aiGrading=document.getElementById('aiGrading').checked;setAiKey(key,aiConfig.remember);saveAiConfig();toast(key?'AI settings saved':'AI key cleared');};
+    document.getElementById('aiFreeOnly').onchange=e=>{document.getElementById('aiModelInput').disabled=e.target.checked;if(e.target.checked)document.getElementById('aiModelInput').value='openrouter/free';};
+    document.getElementById('testAiBtn').onclick=async()=>{document.getElementById('saveAiBtn').click();const out=document.getElementById('aiCoachOutput');out.innerHTML='<div class="ai-loading">Testing connection…</div>';try{const text=await callOpenRouter([{role:'system',content:'Reply with exactly: CyberPath AI online'},{role:'user',content:'Connection test'}],{maxTokens:20,temperature:0});out.innerHTML=`<div class="check-result good">${escapeHtml(text)}</div>`;}catch(e){out.innerHTML=`<div class="check-result bad">${escapeHtml(e.message)}</div>`;}};
+    document.getElementById('askAiBtn').onclick=askGeneralCoach;
     const pd=document.getElementById('profileDialog');document.getElementById('profileBtn').onclick=()=>{document.getElementById('nameInput').value=state.playerName==='Player'?'':state.playerName;pd.showModal();};
     document.getElementById('profileForm').addEventListener('submit',e=>{e.preventDefault();const n=document.getElementById('nameInput').value.trim();if(n)state.playerName=n;saveState();pd.close();renderAll();});
     document.getElementById('missionDialog').addEventListener('close',stopMissionTimer);

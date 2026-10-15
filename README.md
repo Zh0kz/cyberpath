@@ -36,3 +36,11 @@ V2 does **not** contain an AI model inside the app. Open-ended explanations/repo
 
 ## Safe practice
 Only perform active scanning/testing against systems you own or have explicit authorization to test, or against purpose-built CTF/training labs.
+
+
+## Optional AI Coach (V2.2)
+
+CyberPath can call OpenRouter directly from the browser. Do **not** commit an API key to GitHub. Open **✨ AI Coach** inside the app and paste the key there. By default the key is stored only for the browser session; permanent local storage is an explicit opt-in. The default model is `openrouter/free`, so the exact underlying free model may vary. If the AI is unavailable or rate-limited, local missions, hints, checks, reviews and progress still work.
+
+### AI privacy / cost note
+AI requests send the current mission/question and the learner response to OpenRouter/model providers. CyberPath does not include Mission Notes or the API key inside the prompt. Free-only mode is enabled by default and forces `openrouter/free` to reduce the risk of accidentally selecting a paid model.

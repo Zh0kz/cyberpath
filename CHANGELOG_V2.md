@@ -26,3 +26,19 @@
 - A custom vulnerable VM/container bundled with CyberPath.
 
 These are better V3/V4 features because they need infrastructure beyond a static free PWA.
+
+
+## V2.2 — AI Coach & Fair Hints
+
+- Optional OpenRouter AI Coach using `openrouter/free` by default.
+- API key is never hard-coded into project files. Session-only storage is the default; device persistence is opt-in.
+- AI progressive hints that are explicitly instructed not to reveal final answers.
+- Optional meaning-based AI grading for open answers with local fallback when AI is unavailable.
+- Quiz/investigation/lab study notes are now hidden before the attempt instead of exposing answers immediately.
+- Local progressive hint system and Mastery reduction when hints are used; XP remains activity XP.
+- Review Mode no longer reveals the correct answer after the first mistake.
+- Curated official learning resources are shown for each module.
+- `openrouter/free` can change underlying free models and rate limits; CyberPath continues to work without AI.
+
+- Added Free-only mode (default) to force `openrouter/free` and reduce accidental paid-model use.
+- Added explicit privacy note: mission context/answers are sent to OpenRouter when AI features are used; mission notes and the key are not put into prompts.
