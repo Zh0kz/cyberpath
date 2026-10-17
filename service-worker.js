@@ -1,5 +1,5 @@
-const CACHE='cyberpath-v2-2-core-2';
-const ASSETS=['./','./index.html','./styles.css','./data.js','./app.js','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png'];
+const CACHE='cyberpath-v2-2-1-smart-core-1';
+const ASSETS=['./','./index.html','./styles.css?v=221','./data.js?v=221','./validator.js?v=221','./app.js?v=221','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png'];
 
 self.addEventListener('install', event => {
   event.waitUntil(

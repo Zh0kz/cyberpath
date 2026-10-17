@@ -20,3 +20,10 @@
 .ai-output{margin-top:12px}.ai-answer{border:1px solid var(--line);background:rgba(5,18,13,.6);padding:14px;border-radius:14px;line-height:1.55}.ai-loading{color:var(--green);padding:10px 0}.modal-rule{border:0;border-top:1px solid var(--line);margin:20px 0}
 .ai-modal form{max-width:760px}.ai-modal input[type=password],.ai-modal input[type=text],.ai-modal textarea{width:100%}
 @media(max-width:700px){.ai-dashboard-card{align-items:flex-start;flex-direction:column}.ai-status-line{justify-content:flex-start}.guidance-head{flex-direction:column}.top-actions{gap:6px}.icon-btn,.avatar-btn{min-width:44px}}
+
+/* V2.2.1 Smart Learning Engine */
+.appeal-box{margin-top:10px;border:1px solid #35506d;background:rgba(58,94,145,.10);border-radius:14px;padding:12px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.appeal-btn{flex:none}.appeal-note{margin-top:10px;padding:10px;border:1px dashed #3f5368;border-radius:12px;color:#bdd4ea;background:rgba(58,94,145,.07)}
+.appeal-result{margin-top:10px;border-radius:14px;padding:12px}.appeal-result.accepted{border:1px solid #287f57;background:rgba(53,245,154,.08);color:#b9ffdd}.appeal-result.almost{border:1px solid #8d6e26;background:rgba(255,189,89,.08);color:#ffe2a7}.appeal-result.rejected{border:1px solid #7f4f28;background:rgba(255,139,87,.08);color:#ffd0b5}.appeal-result small{display:block;margin-top:7px;color:var(--muted)}.appeal-clue{margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.08)}
+.answer-reveal{border:1px solid #765c24;background:rgba(255,189,89,.07);border-radius:14px;padding:13px;margin-top:10px}.revealed-answer{font:800 18px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--yellow);margin:8px 0 6px;word-break:break-word}.learning-box.compact{margin:10px 0}.feedback-clue{margin-top:10px;border-left:3px solid #8c6b28;padding:9px 11px;background:rgba(255,189,89,.06);color:#f3d8a4;border-radius:8px}.secondary-btn:disabled,.text-btn:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:620px){.appeal-box{align-items:stretch;flex-direction:column}.appeal-btn{width:100%}}

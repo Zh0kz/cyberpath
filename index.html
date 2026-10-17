@@ -4,12 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#06100c" />
-  <meta name="description" content="CyberPath V2.2 — cybersecurity training RPG with optional AI Coach with real labs, mastery, reviews, bosses and journal." />
+  <meta name="description" content="CyberPath V2.2.1 — cybersecurity training RPG with smart grading appeals, limited hints, real labs, mastery, reviews, bosses and journal." />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="assets/icon-192.png" />
   <link rel="apple-touch-icon" href="assets/icon-192.png" />
-  <link rel="stylesheet" href="styles.css" />
-  <title>CyberPath V2.2</title>
+  <link rel="stylesheet" href="styles.css?v=221" />
+  <title>CyberPath V2.2.1</title>
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
@@ -17,10 +17,10 @@
     <header class="topbar">
       <div>
         <div class="eyebrow">CYBERSECURITY TRAINING RPG</div>
-        <h1>CYBERPATH<span class="cursor">_</span><sup>V2.2</sup></h1>
+        <h1>CYBERPATH<span class="cursor">_</span><sup>V2.2.1</sup></h1>
       </div>
       <div class="top-actions">
-        <button id="aiBtn" class="icon-btn ai-top-btn" type="button" title="Configure AI Coach">✨</button>
+        <button id="aiBtn" class="icon-btn ai-top-btn" type="button" title="Configure AI Judge & Coach">✨</button>
         <button id="installBtn" class="icon-btn" type="button" title="Установить">⬇</button>
         <button id="profileBtn" class="avatar-btn" type="button" title="Профиль">CP</button>
       </div>
@@ -49,7 +49,7 @@
           <article class="mini-card"><span>⏱</span><div><b id="studyTime">0m</b><small>Study time</small></div></article>
         </div>
 
-        <section class="panel ai-dashboard-card"><div><p class="muted tiny">OPTIONAL AI COACH</p><h3>✨ CyberPath AI</h3><p class="muted">Progressive hints and meaning-based feedback through your own OpenRouter key. The key is never included in the CyberPath files.</p></div><div class="ai-status-line"><span id="aiStatusText" class="chip">Not configured</span><button class="secondary-btn" type="button" onclick="document.getElementById('aiBtn').click()">Configure</button></div></section>
+        <section class="panel ai-dashboard-card"><div><p class="muted tiny">OPTIONAL AI JUDGE</p><h3>⚖️ Smart grading</h3><p class="muted">CyberPath checks normal answer variants locally. If a correct answer is rejected, you can challenge the grading and let AI judge the meaning of that exact submission.</p></div><div class="ai-status-line"><span id="aiStatusText" class="chip">Not configured</span><button class="secondary-btn" type="button" onclick="document.getElementById('aiBtn').click()">Configure</button></div></section>
 
         <section id="placementBanner" class="panel placement-card">
           <div><p class="muted tiny">OPTIONAL FAST START</p><h3>🧪 Placement Test</h3><p class="muted">15 вопросов. Уже знакомые темы получат стартовый Mastery, а Foundations checkpoint можно зачесть автоматически при сильном результате.</p></div>
@@ -150,10 +150,11 @@
   <dialog id="bossDialog" class="modal boss-modal"><form method="dialog"><button class="modal-close" value="cancel">×</button><div id="bossDialogContent"></div></form></dialog>
   <dialog id="placementDialog" class="modal boss-modal"><form method="dialog"><button class="modal-close" value="cancel">×</button><div id="placementContent"></div></form></dialog>
 
-  <dialog id="aiDialog" class="modal ai-modal"><form method="dialog"><button class="modal-close" value="cancel">×</button><p class="muted tiny">CYBERPATH AI • OPENROUTER</p><h2>✨ AI Coach</h2><div class="security-note"><b>API key safety</b><br>Никогда не вставляй ключ в GitHub/code и не отправляй его в заметки. Здесь он вводится только в браузере. Без галочки “Remember” ключ живёт только до закрытия вкладки/браузерной сессии. Когда ты используешь AI, текст вопроса/твоего ответа отправляется в OpenRouter и выбранному model provider; Mission Notes и сам API key в prompt не отправляются.</div><label class="field-label">OpenRouter API key<input id="aiKeyInput" type="password" autocomplete="off" placeholder="sk-or-v1-…" /></label><label class="check-row"><input id="aiFreeOnly" type="checkbox" checked /><span><b>Free-only mode</b> — всегда использовать <code>openrouter/free</code>, чтобы случайно не выбрать платную модель</span></label><label class="field-label">Model<input id="aiModelInput" value="openrouter/free" autocomplete="off" disabled /></label><label class="check-row"><input id="aiRemember" type="checkbox" /><span>Remember key on this device (localStorage)</span></label><label class="check-row"><input id="aiGrading" type="checkbox" checked /><span>Use AI for open-answer grading when available</span></label><div class="button-row"><button id="saveAiBtn" class="primary-btn" type="button">Save settings</button><button id="testAiBtn" class="secondary-btn" type="button">Test AI</button></div><p class="muted small">Default <b>openrouter/free</b> uses OpenRouter's free-model router. Availability, model choice and rate limits are controlled by OpenRouter and can change. Turn Free-only off only if you intentionally want another model.</p><hr class="modal-rule"><h3>Ask Cyber Coach</h3><textarea id="aiCoachQuestion" rows="5" placeholder="Например: объясни разницу между TCP и UDP без готового ответа на мой текущий quiz."></textarea><button id="askAiBtn" class="secondary-btn full" type="button">Ask AI Coach</button><div id="aiCoachOutput" class="ai-output"></div></form></dialog>
+  <dialog id="aiDialog" class="modal ai-modal"><form method="dialog"><button class="modal-close" value="cancel">×</button><p class="muted tiny">CYBERPATH AI • OPENROUTER</p><h2>⚖️ AI Judge & Coach</h2><div class="security-note"><b>API key safety</b><br>Никогда не вставляй ключ в GitHub/code и не отправляй его в заметки. Здесь он вводится только в браузере. Без галочки “Remember” ключ живёт только до закрытия вкладки/браузерной сессии. Когда ты используешь AI, текст вопроса/твоего ответа отправляется в OpenRouter и выбранному model provider; Mission Notes и сам API key в prompt не отправляются.</div><label class="field-label">OpenRouter API key<input id="aiKeyInput" type="password" autocomplete="off" placeholder="sk-or-v1-…" /></label><label class="check-row"><input id="aiFreeOnly" type="checkbox" checked /><span><b>Free-only mode</b> — всегда использовать <code>openrouter/free</code>, чтобы случайно не выбрать платную модель</span></label><label class="field-label">Model<input id="aiModelInput" value="openrouter/free" autocomplete="off" disabled /></label><label class="check-row"><input id="aiRemember" type="checkbox" /><span>Remember key on this device (localStorage)</span></label><label class="check-row"><input id="aiGrading" type="checkbox" checked /><span>Use AI semantic grading for long open answers when available</span></label><div class="button-row"><button id="saveAiBtn" class="primary-btn" type="button">Save settings</button><button id="testAiBtn" class="secondary-btn" type="button">Test AI</button></div><p class="muted small">Default <b>openrouter/free</b> uses OpenRouter's free-model router. Availability, model choice and rate limits are controlled by OpenRouter and can change. Turn Free-only off only if you intentionally want another model.</p><hr class="modal-rule"><h3>Ask Cyber Coach</h3><textarea id="aiCoachQuestion" rows="5" placeholder="Например: объясни разницу между TCP и UDP. Для спорной проверки ответа используй кнопку Challenge grading внутри миссии."></textarea><button id="askAiBtn" class="secondary-btn full" type="button">Ask AI Coach</button><div id="aiCoachOutput" class="ai-output"></div></form></dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="data.js" defer></script>
-  <script src="app.js" defer></script>
+  <script src="data.js?v=221" defer></script>
+  <script src="validator.js?v=221" defer></script>
+  <script src="app.js?v=221" defer></script>
 </body>
 </html>

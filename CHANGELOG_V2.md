@@ -42,3 +42,24 @@ These are better V3/V4 features because they need infrastructure beyond a static
 
 - Added Free-only mode (default) to force `openrouter/free` and reduce accidental paid-model use.
 - Added explicit privacy note: mission context/answers are sent to OpenRouter when AI features are used; mission notes and the key are not put into prompts.
+
+## V2.2.1 — Smart Learning Engine
+
+- Removed the in-mission **AI Hint** button.
+- Added a strict **3-hint maximum** for normal missions; old saved values above 3 are migrated down to 3/3.
+- Added deterministic progressive hints so the same hint cannot be farmed repeatedly.
+- Added **Show answer** only after hints reach 3/3.
+- Answer reveal now limits Mastery reward to 25% for that completion and schedules a next-day review.
+- Added **Quick retry** after answer reveal.
+- Added `validator.js` with smarter normalization of case, whitespace, arrows and separators.
+- TCP handshake variants such as `SYN SYN/ACK ACK`, `SYN -> SYN-ACK -> ACK`, and `syn syn ack ack` now normalize to the same meaning.
+- Technical typos such as `ACK` → `ACT` remain rejected locally instead of being silently corrected.
+- Added **⚖️ Challenge grading** after rejected answers.
+- AI appeals return `correct`, `almost_correct`, or `incorrect` and are instructed not to reveal the full solution for non-correct verdicts.
+- Accepted appeals override the local validator, roll back that false mistake, and save the accepted normalized wording locally.
+- Added one-appeal-per-exact-answer protection to avoid repeated API spam.
+- Added local disagreement history (last 100 appeal results) for future validator improvement.
+- Review Mode hint can no longer be clicked repeatedly for the same clue.
+- Learning-resource panels are limited to the two most relevant links per mission.
+- Added validator regression tests for TCP notation, Windows commands and false-positive protection.
+- Local development moved to port `8094`; service-worker cache version was bumped to prevent stale V2.2 assets.

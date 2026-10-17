@@ -8,6 +8,7 @@
   const AI_KEY_LOCAL = 'cyberpath:v2:openrouter-key';
   const AI_KEY_SESSION = 'cyberpath:v2:openrouter-key-session';
   const DAILY_GOAL = 25;
+  const MAX_MISSION_HINTS = 3;
   const REVIEW_INTERVALS = [1,3,7,14,30];
   const BOSS_MASTERY_REQ = {
     foundations:50, networking:60, linux:60, recon:60, web:60, websec:62, privesc:62, pentest:65
@@ -44,7 +45,11 @@
     bosses: [],
     bossHints: {},
     missionHints: {},
+    missionReveals: {},
     missionAttempts: {},
+    missionAppeals: {},
+    learnedAnswers: {},
+    gradingDisagreements: [],
     mistakes: {},
     review: {},
     reviewCorrect: 0,
@@ -88,7 +93,12 @@
     s.bosses = Array.isArray(s.bosses) ? s.bosses : [];
     s.bossHints = s.bossHints && typeof s.bossHints==='object' ? s.bossHints : {};
     s.missionHints = s.missionHints && typeof s.missionHints==='object' ? s.missionHints : {};
+    for(const id of Object.keys(s.missionHints)) s.missionHints[id]=Math.max(0,Math.min(MAX_MISSION_HINTS,Number(s.missionHints[id])||0));
+    s.missionReveals = s.missionReveals && typeof s.missionReveals==='object' ? s.missionReveals : {};
     s.missionAttempts = s.missionAttempts && typeof s.missionAttempts==='object' ? s.missionAttempts : {};
+    s.missionAppeals = s.missionAppeals && typeof s.missionAppeals==='object' ? s.missionAppeals : {};
+    s.learnedAnswers = s.learnedAnswers && typeof s.learnedAnswers==='object' ? s.learnedAnswers : {};
+    s.gradingDisagreements = Array.isArray(s.gradingDisagreements) ? s.gradingDisagreements : [];
     s.mistakes = s.mistakes && typeof s.mistakes==='object' ? s.mistakes : {};
     s.review = s.review && typeof s.review==='object' ? s.review : {};
     s.notes = s.notes && typeof s.notes==='object' ? s.notes : {};
@@ -164,7 +174,7 @@
   function saveAiConfig(){ localStorage.setItem(AI_CONFIG_KEY,JSON.stringify(aiConfig)); renderAiStatus(); }
   function aiReady(){ return !!getAiKey(); }
   function renderAiStatus(){
-    const b=document.getElementById('aiBtn'); if(b){b.classList.toggle('ai-ready',aiReady());b.title=aiReady()?'AI Coach connected':'Configure AI Coach';}
+    const b=document.getElementById('aiBtn'); if(b){b.classList.toggle('ai-ready',aiReady());b.title=aiReady()?'AI Judge connected':'Configure AI Judge & Coach';}
     const s=document.getElementById('aiStatusText'); if(s)s.textContent=aiReady()?`Connected • ${aiConfig.freeOnly!==false?'openrouter/free':aiConfig.model}`:'Not configured';
   }
   async function callOpenRouter(messages,{maxTokens=350,temperature=.25}={}){
@@ -186,29 +196,52 @@
     return String(text).trim();
   }
   function cyberCoachSystem(mode='coach'){
-    return `You are CyberPath AI Coach, a concise cybersecurity tutor for a beginner. Reply primarily in Russian, keeping English technical terms when useful. The learner may only practice on their own devices, CTFs, intentionally vulnerable labs, or explicitly authorized systems. Never encourage testing random real targets. In HINT mode never reveal the final answer, exact MCQ choice, flag, password, full command answer, exploit payload, or complete solution; give one progressive conceptual clue only. In GRADING mode evaluate understanding rather than exact wording and do not reveal the full correct answer when the response is wrong. Mode: ${mode}.`;
+    return `You are CyberPath AI, a concise cybersecurity tutor and grading judge for a beginner. Reply primarily in Russian, keeping English technical terms when useful. The learner may only practice on their own devices, CTFs, intentionally vulnerable labs, or explicitly authorized systems. Never encourage testing random real targets. In GRADING mode evaluate understanding rather than exact wording. In APPEAL mode act as an independent judge: decide whether the submitted answer is semantically correct, almost correct, or incorrect. Never reveal the complete correct answer when the verdict is almost_correct or incorrect; give only a targeted clue about what is wrong or missing. Mode: ${mode}.`;
   }
   function missionQuestionText(m){
     const c=m.check||{};
     if(c.kind==='mcq') return `${c.question}\nOptions: ${(c.options||[]).map((x,i)=>`${i+1}) ${x}`).join(' | ')}`;
     return c.question||'Complete the mission.';
   }
-  async function requestAiHint(m,root){
-    const btn=root.querySelector('[data-ai-hint]'); const box=root.querySelector('[data-hints-area]');
-    if(!aiReady()){openAiDialog();toast('Add your OpenRouter key first');return;}
-    if(btn){btn.disabled=true;btn.textContent='AI thinking…';}
-    try{
-      const answer=(root.querySelector('[data-answer]')?.value||root.querySelector('input[name="missionAnswer"]:checked')?.nextElementSibling?.textContent||'').trim();
-      const used=Number(state.missionHints[m.id]||0);
-      const text=await callOpenRouter([
-        {role:'system',content:cyberCoachSystem('HINT')},
-        {role:'user',content:`Mission: ${m.title}\nSkill: ${skillName(m.skill)}\nBriefing: ${m.briefing}\nQuestion: ${missionQuestionText(m)}\nLearner answer so far: ${answer||'(none)'}\nHint number: ${used+1}. Give exactly one useful hint without stating the answer.`}
-      ],{maxTokens:180,temperature:.2});
-      state.missionHints[m.id]=used+1; saveState();
-      const h=document.createElement('div');h.className='hint-box ai-hint';h.innerHTML=`<b>✨ AI Hint ${used+1}</b><br>${escapeHtml(text)}`;box.appendChild(h);
-      updateHintButtons(m,root);
-    }catch(e){const h=document.createElement('div');h.className='check-result bad';h.textContent=`AI unavailable: ${e.message}`;box.appendChild(h);}
-    finally{if(btn){btn.disabled=false;btn.textContent='✨ AI hint';}}
+  function getMissionAnswer(m,root){
+    const c=m.check||{};
+    if(c.kind==='mcq'){
+      const checked=root.querySelector('input[name="missionAnswer"]:checked');
+      if(!checked) return {empty:true,text:'',raw:'',index:null};
+      const index=Number(checked.value);
+      const text=String(c.options?.[index]??'').trim();
+      return {empty:!text,text,raw:text,index};
+    }
+    const raw=String(root.querySelector('[data-answer]')?.value||'').trim();
+    return {empty:!raw,text:raw,raw,index:null};
+  }
+  function missionRubric(m){
+    const c=m.check||{};
+    if(c.kind==='mcq') return `Correct option (instructor-only): ${c.options?.[c.correct]??''}`;
+    if(c.kind==='short') return `Accepted meanings/examples (instructor-only): ${(c.answers||[]).join(' | ')}`;
+    if(c.kind==='keywords') return `Required concepts (instructor-only): ${(c.keywords||[]).join(', ')}. Need at least ${c.need||1}.`;
+    if(c.kind==='explain') return `Expected concepts (instructor-only): ${(c.keywords||[]).join(', ')}. Minimum useful length ${c.minChars||80}. Instructor notes: ${(m.body||[]).join(' | ')}`;
+    if(c.kind==='report') return `Report should be coherent and at least ${c.minChars||180} characters. Instructor notes: ${(m.body||[]).join(' | ')}`;
+    return `Instructor notes: ${(m.body||[]).join(' | ')}`;
+  }
+  function appealFingerprint(m,root){
+    const answer=getMissionAnswer(m,root);
+    if(answer.empty) return '';
+    return `${m.check?.kind||'none'}:${window.CYBER_VALIDATOR?.fingerprint(answer.text)||answer.text.toLowerCase()}`;
+  }
+  function appealAlreadyUsed(m,fingerprint){
+    return Array.isArray(state.missionAppeals[m.id]) && state.missionAppeals[m.id].includes(fingerprint);
+  }
+  function recordAppealUse(m,fingerprint){
+    if(!Array.isArray(state.missionAppeals[m.id])) state.missionAppeals[m.id]=[];
+    if(!state.missionAppeals[m.id].includes(fingerprint)) state.missionAppeals[m.id].push(fingerprint);
+  }
+  function rememberAcceptedAnswer(m,answer){
+    if(m.check?.kind==='mcq' || !answer) return;
+    const canonical=window.CYBER_VALIDATOR?.canonicalize(answer)||normalizeText(answer);
+    if(!canonical) return;
+    if(!Array.isArray(state.learnedAnswers[m.id])) state.learnedAnswers[m.id]=[];
+    if(!state.learnedAnswers[m.id].includes(canonical)) state.learnedAnswers[m.id].push(canonical);
   }
   function extractJson(text){
     const clean=String(text).replace(/```json/gi,'').replace(/```/g,'').trim();
@@ -220,14 +253,59 @@
     if(!aiReady()||!aiConfig.aiGrading||!['explain','report','keywords'].includes(m.check?.kind)) return null;
     const val=String(root.querySelector('[data-answer]')?.value||'').trim(); if(!val)return null;
     try{
-      showInlineCheck(root,'✨ AI Coach проверяет смысл ответа…',true);
+      showInlineCheck(root,'✨ AI проверяет смысл ответа…',true);
       const raw=await callOpenRouter([
         {role:'system',content:cyberCoachSystem('GRADING')+' Return ONLY JSON: {"pass":boolean,"score":0-100,"feedback":"short feedback","next_hint":"one clue without the final answer"}.'},
-        {role:'user',content:`Mission: ${m.title}\nSkill: ${skillName(m.skill)}\nBriefing: ${m.briefing}\nQuestion: ${missionQuestionText(m)}\nLearner response:\n${val}\nEvaluate whether the learner demonstrates the required concept. Do not demand exact wording.`}
-      ],{maxTokens:260,temperature:.1});
+        {role:'user',content:`Mission: ${m.title}\nSkill: ${skillName(m.skill)}\nQuestion: ${missionQuestionText(m)}\n${missionRubric(m)}\nLearner response:\n${val}\nEvaluate whether the learner demonstrates the required concept. Do not demand exact wording. If wrong, do not reveal the complete answer.`}
+      ],{maxTokens:280,temperature:.1});
       const j=extractJson(raw); if(!j) throw new Error('Could not parse AI grading response.');
-      return {ok:!!j.pass,msg:`AI: ${String(j.feedback||'Response reviewed.')}`,hint:String(j.next_hint||''),score:Number(j.score)||0};
+      return {ok:!!j.pass,msg:`AI semantic check: ${String(j.feedback||'Response reviewed.')}`,hint:String(j.next_hint||''),score:Number(j.score)||0,source:'ai-semantic'};
     }catch(e){return {fallback:true,error:e.message};}
+  }
+
+  async function challengeGrading(m,root){
+    const area=root.querySelector('[data-appeal-area]');
+    const answer=getMissionAnswer(m,root);
+    if(answer.empty){toast('Сначала введи ответ');return;}
+    const fingerprint=appealFingerprint(m,root);
+    if(!fingerprint){toast('Не удалось прочитать ответ');return;}
+    if(root.dataset.lastRejectedFingerprint!==fingerprint){toast('Сначала нажми Verify для этого ответа');return;}
+    if(appealAlreadyUsed(m,fingerprint)){
+      if(area) area.innerHTML='<div class="appeal-note">⚖️ Этот exact answer уже был оспорен. Измени ответ и снова нажми Verify.</div>';
+      return;
+    }
+    if(!aiReady()){openAiDialog();toast('Добавь OpenRouter API key для оспаривания');return;}
+    const btn=area?.querySelector('[data-challenge-grading]');
+    if(btn){btn.disabled=true;btn.textContent='⚖️ AI judging…';}
+    try{
+      const raw=await callOpenRouter([
+        {role:'system',content:cyberCoachSystem('APPEAL')+' Return ONLY JSON: {"verdict":"correct|almost_correct|incorrect","score":0-100,"feedback":"short Russian feedback","retry_hint":"one targeted clue; empty when verdict is correct"}.'},
+        {role:'user',content:`A local validator rejected this answer. Act as an independent grading judge.\nMission: ${m.title}\nSkill: ${skillName(m.skill)}\nQuestion: ${missionQuestionText(m)}\n${missionRubric(m)}\nSubmitted answer:\n${answer.text}\n\nJudge the meaning, tolerate harmless formatting/case/separators, but do not forgive a technical error. A typo that changes a protocol keyword (for example ACK -> ACT) should normally be almost_correct, not correct. If verdict is almost_correct or incorrect, do NOT reveal the full correct answer.`}
+      ],{maxTokens:300,temperature:0});
+      const j=extractJson(raw);
+      if(!j || !['correct','almost_correct','incorrect'].includes(String(j.verdict))) throw new Error('Could not parse AI appeal response.');
+      recordAppealUse(m,fingerprint);
+      const verdict=String(j.verdict);
+      const score=Math.max(0,Math.min(100,Number(j.score)||0));
+      state.gradingDisagreements.push({mission:m.id,date:new Date().toISOString(),answer:answer.text.slice(0,500),verdict,score});
+      if(state.gradingDisagreements.length>100) state.gradingDisagreements=state.gradingDisagreements.slice(-100);
+      saveState();
+
+      if(verdict==='correct'){
+        rememberAcceptedAnswer(m,answer.text);
+        rollbackLastWrong(root,m.skill);
+        if(area) area.innerHTML=`<div class="appeal-result accepted"><b>⚖️ Appeal accepted</b><br>${escapeHtml(String(j.feedback||'Ответ корректен по смыслу.'))}<br><small>CyberPath запомнил этот вариант ответа на этом устройстве.</small></div>`;
+        await finalizeMission(m,root,{gradingSource:'appeal'});
+        return;
+      }
+
+      const title=verdict==='almost_correct'?'🟡 Almost correct':'❌ Appeal rejected';
+      const hint=String(j.retry_hint||'').trim();
+      if(area) area.innerHTML=`<div class="appeal-result ${verdict==='almost_correct'?'almost':'rejected'}"><b>${title}</b><br>${escapeHtml(String(j.feedback||'Ответ нужно исправить.'))}${hint?`<div class="appeal-clue"><b>Что проверить:</b> ${escapeHtml(hint)}</div>`:''}<small>Измени ответ → Verify. Новый ответ можно оспорить снова.</small></div>`;
+      saveState();
+    }catch(e){
+      if(area) area.innerHTML=`<div class="appeal-result rejected"><b>AI appeal unavailable</b><br>${escapeHtml(e.message)}</div>`;
+    }
   }
   async function askGeneralCoach(){
     const q=document.getElementById('aiCoachQuestion')?.value?.trim(); const out=document.getElementById('aiCoachOutput');
@@ -353,39 +431,54 @@
     return allSkillIds().filter(s=>skillMastery(s)>0 || state.mistakes[s]).sort((a,b)=>weaknessScore(b)-weaknessScore(a)).slice(0,limit);
   }
 
-  function normalizeText(v){ return String(v||'').toLowerCase().trim().replace(/\s+/g,' ').replace(/[“”"'`]/g,''); }
+  function normalizeText(v){
+    return window.CYBER_VALIDATOR?.canonicalize(v) || String(v||'').toLowerCase().trim().replace(/\s+/g,' ').replace(/[“”"'`]/g,'');
+  }
+  function learnedAnswerMatches(m,value){
+    const learned=Array.isArray(state.learnedAnswers[m.id])?state.learnedAnswers[m.id]:[];
+    const canonical=normalizeText(value);
+    return !!canonical && learned.includes(canonical);
+  }
   function checkMissionAnswer(m,root){
     const c=m.check;
-    if(!c) return {ok:true};
+    if(!c) return {ok:true,source:'local'};
     if(c.kind==='mcq'){
       const checked=root.querySelector('input[name="missionAnswer"]:checked');
-      if(!checked) return {ok:false,empty:true,msg:'Выбери ответ.'};
+      if(!checked) return {ok:false,empty:true,msg:'Выбери ответ.',source:'local'};
       const ok=Number(checked.value)===c.correct;
-      return {ok,msg:ok?'Верно.':'Пока нет. Перечитай briefing и попробуй ещё раз.'};
+      return {ok,msg:ok?'Верно.':'Пока нет. Проверь логику вопроса и попробуй ещё раз.',source:'local'};
     }
     const input=root.querySelector('[data-answer]');
     const val=String(input?.value||'').trim();
-    if(!val) return {ok:false,empty:true,msg:'Сначала введи ответ.'};
+    if(!val) return {ok:false,empty:true,msg:'Сначала введи ответ.',source:'local'};
     const n=normalizeText(val);
+    if(learnedAnswerMatches(m,val)) return {ok:true,msg:'Верно — этот эквивалентный вариант уже был подтверждён.',source:'learned'};
     if(c.kind==='short'){
-      const ok=(c.answers||[]).some(a=>n===normalizeText(a) || n.includes(normalizeText(a)));
-      return {ok,msg:ok?'Верно.':'Ответ не совпал с ожидаемым. Проверь команду/термин.'};
+      const ok=window.CYBER_VALIDATOR?.shortMatches(val,c.answers||[]) ?? (c.answers||[]).some(a=>n===normalizeText(a) || n.includes(normalizeText(a)));
+      return {ok,msg:ok?'Верно.':'Ответ пока не принят. Если уверен, что смысл правильный, можешь оспорить проверку.',source:'local'};
     }
     if(c.kind==='keywords'){
       const hits=(c.keywords||[]).filter(k=>n.includes(normalizeText(k))).length;
       const ok=hits>=(c.need||1);
-      return {ok,msg:ok?'Достаточно ключевых идей.':`Нужно отразить ещё ключевые идеи (${hits}/${c.need||1}).`};
+      return {ok,msg:ok?'Достаточно ключевых идей.':`Нужно отразить ещё ключевые идеи (${hits}/${c.need||1}).`,source:'local'};
     }
     if(c.kind==='explain'){
       const hits=(c.keywords||[]).filter(k=>n.includes(normalizeText(k))).length;
       const ok=val.length>=(c.minChars||80) && hits>=(c.need||0);
-      return {ok,msg:ok?'Хорошее teach-back объяснение.':`Нужно минимум ${c.minChars||80} символов и больше ключевых идей.`};
+      return {ok,msg:ok?'Локальная проверка пройдена.':'Ответ пока слишком короткий или не покрывает ключевые идеи.',source:'local'};
     }
     if(c.kind==='report'){
       const ok=val.length>=(c.minChars||180);
-      return {ok,msg:ok?'Report выглядит достаточно содержательным для фиксации результата.':`Нужно минимум ${c.minChars||180} символов.`};
+      return {ok,msg:ok?'Локальная проверка отчёта пройдена.':`Нужно минимум ${c.minChars||180} символов.`,source:'local'};
     }
-    return {ok:true};
+    return {ok:true,source:'local'};
+  }
+
+  function rollbackLastWrong(root,skill){
+    if(root?.dataset?.wrongRecorded!=='1') return;
+    const x=state.mistakes[skill];
+    if(x && Number(x.wrong)>0) x.wrong--;
+    root.dataset.wrongRecorded='0';
   }
 
   function addReviewCardForSkill(skill,due=today()){
@@ -401,45 +494,90 @@
     addReviewCardForSkill(m.skill,dateOffset(new Date(),1));
   }
 
+  function clearAppealArea(root){
+    const area=root.querySelector('[data-appeal-area]');
+    if(area) area.innerHTML='';
+    if(root?.dataset) delete root.dataset.lastRejectedFingerprint;
+  }
+
+  function showAppealOption(m,root,result){
+    const area=root.querySelector('[data-appeal-area]');
+    if(!area) return;
+    const fp=appealFingerprint(m,root);
+    if(!fp){area.innerHTML='';return;}
+    const used=appealAlreadyUsed(m,fp);
+    root.dataset.lastRejectedFingerprint=fp;
+    const source=result?.source==='ai-semantic'?'AI semantic check':'local validator';
+    area.innerHTML=`<div class="appeal-box"><div><b>Думаешь, проверка ошиблась?</b><br><span class="muted small">Оспаривание относится только к этому exact answer. AI увидит вопрос, rubric и твой ответ. Источник отказа: ${escapeHtml(source)}.</span></div><button type="button" class="secondary-btn appeal-btn" data-challenge-grading ${used?'disabled':''}>${used?'⚖️ Appeal used':'⚖️ Challenge grading'}</button></div>`;
+    area.querySelector('[data-challenge-grading]')?.addEventListener('click',()=>challengeGrading(m,root));
+  }
+
+  async function finalizeMission(m,root,{gradingSource='local'}={}){
+    if(missionDone(m.id)) return;
+    recordAnswer(m.skill,true);
+    root.dataset.wrongRecorded='0';
+    const elapsed=missionOpenedAt?Math.max(1,Math.round((Date.now()-missionOpenedAt)/60000)):1;
+    const study=Math.min(m.duration,Math.max(1,focusSeconds?Math.round(focusSeconds/60):elapsed));
+    state.completed.push({id:m.id,date:today(),xp:m.xp,module:m.module,skill:m.skill,type:m.type,gradingSource});
+    addXp(m.xp);
+    const usedHints=Math.min(MAX_MISSION_HINTS,Number(state.missionHints[m.id]||0));
+    const answerRevealed=!!state.missionReveals[m.id];
+    let hintMultiplier=usedHints===0?1:usedHints===1?.85:usedHints===2?.70:.55;
+    if(answerRevealed) hintMultiplier=Math.min(hintMultiplier,.25);
+    const masteryGain=Math.max(1,Math.round(m.mastery*3*hintMultiplier));
+    addMastery(m.skill,masteryGain);
+    addStudy(study);
+    scheduleReviewsForMission(m);
+    if(answerRevealed) addReviewCardForSkill(m.skill,dateOffset(new Date(),1));
+    const note=root.querySelector('[data-mission-note]')?.value?.trim();
+    if(note) state.notes[m.id]=note;
+    saveState();
+    stopMissionTimer();
+    clearAppealArea(root);
+    const detail=[usedHints?`${usedHints}/${MAX_MISSION_HINTS} hints`:null,answerRevealed?'answer revealed':null,gradingSource==='appeal'?'AI appeal accepted':null].filter(Boolean).join(' • ');
+    showInlineCheck(root,`Mission complete • +${m.xp} XP • +${masteryGain} mastery${detail?` • ${detail}`:''}`,true);
+    revealStudyNotes(m,root,true);
+    const btn=root.querySelector('[data-complete-mission]'); if(btn){btn.disabled=true;btn.textContent='Completed ✓';}
+    root.querySelector('[data-local-hint]')?.setAttribute('disabled','');
+    root.querySelector('[data-show-answer]')?.setAttribute('disabled','');
+    renderAll();
+    toast(`+${m.xp} XP • ${skillName(m.skill)} +${masteryGain} mastery`);
+  }
+
   async function completeMission(m,root){
     if(missionDone(m.id)){ toast('Mission already completed'); return; }
-    state.missionAttempts[m.id]=(state.missionAttempts[m.id]||0)+1;
+    clearAppealArea(root);
     let result=checkMissionAnswer(m,root);
+    if(result.empty){
+      showInlineCheck(root,result.msg||'Сначала дай ответ.',false);
+      return;
+    }
+    state.missionAttempts[m.id]=(state.missionAttempts[m.id]||0)+1;
+    saveState();
+
     if(result.ok){
       const aiResult=await aiGradeMission(m,root);
       if(aiResult && !aiResult.fallback) result=aiResult;
       else if(aiResult?.fallback) toast(`AI grading fallback: ${aiResult.error}`);
     }
+
     if(!result.ok){
       recordAnswer(m.skill,false);
+      root.dataset.wrongRecorded='1';
       addReviewCardForSkill(m.skill,today());
       saveState();
       showInlineCheck(root,result.msg||'Пока нет. Попробуй ещё раз.',false);
-      if(result.hint){const box=root.querySelector('[data-hints-area]');const h=document.createElement('div');h.className='hint-box ai-hint';h.innerHTML=`<b>✨ AI feedback hint</b><br>${escapeHtml(result.hint)}`;box?.appendChild(h);}
+      if(result.hint){
+        const feedback=root.querySelector('[data-feedback-area]');
+        if(feedback) feedback.innerHTML=`<div class="feedback-clue"><b>Что проверить:</b> ${escapeHtml(result.hint)}</div>`;
+      }
+      showAppealOption(m,root,result);
       updateHintButtons(m,root);
       renderWeakSkills();
       return;
     }
-    recordAnswer(m.skill,true);
-    const elapsed=missionOpenedAt?Math.max(1,Math.round((Date.now()-missionOpenedAt)/60000)):1;
-    const study=Math.min(m.duration,Math.max(1,focusSeconds?Math.round(focusSeconds/60):elapsed));
-    state.completed.push({id:m.id,date:today(),xp:m.xp,module:m.module,skill:m.skill,type:m.type});
-    addXp(m.xp);
-    const usedHints=Number(state.missionHints[m.id]||0);
-    const hintMultiplier=usedHints===0?1:usedHints===1?.85:usedHints===2?.7:.55;
-    const masteryGain=Math.max(1,Math.round(m.mastery*3*hintMultiplier));
-    addMastery(m.skill,masteryGain);
-    addStudy(study);
-    scheduleReviewsForMission(m);
-    const note=root.querySelector('[data-mission-note]')?.value?.trim();
-    if(note) state.notes[m.id]=note;
-    saveState();
-    stopMissionTimer();
-    showInlineCheck(root,`Mission complete • +${m.xp} XP • +${masteryGain} mastery${usedHints?` • ${usedHints} hint(s) used`:''}`,true);
-    revealStudyNotes(m,root,true);
-    const btn=root.querySelector('[data-complete-mission]'); if(btn){btn.disabled=true;btn.textContent='Completed ✓';}
-    renderAll();
-    toast(`+${m.xp} XP • ${skillName(m.skill)} +${masteryGain} mastery`);
+
+    await finalizeMission(m,root,{gradingSource:result.source||'local'});
   }
 
   function showInlineCheck(root,msg,good){
@@ -485,35 +623,121 @@
     return `<h4>${escapeHtml(c.question)}</h4><textarea class="answer-input" data-answer rows="${rows}" placeholder="Твой ответ..."></textarea>`;
   }
 
+  const MISSION_HINT_OVERRIDES = {
+    'n-tcp':[
+      'Представь начало разговора: клиент первым просит установить соединение. Как называется флаг синхронизации?',
+      'Ответ сервера делает две вещи одновременно: подтверждает первый запрос и отправляет собственный запрос синхронизации.',
+      'Финальное сообщение клиента уже не начинает новую синхронизацию — оно подтверждает ответ сервера.'
+    ],
+    'n-subnet24':[
+      'В /24 первые 24 бита относятся к network part. Сколько бит остаётся?',
+      'Количество адресов считается как 2 в степени количества host bits.',
+      'Здесь спрашивают все адреса subnet, а не только usable hosts.'
+    ],
+    'f-ports':[
+      'Вспомни стандартный remote shell protocol, который заменил небезопасный Telnet.',
+      'Его default port находится в первых 25 TCP ports.',
+      'Не путай его с FTP 21 и DNS 53.'
+    ]
+  };
+
+  function progressiveHints(m){
+    if(MISSION_HINT_OVERRIDES[m.id]) return MISSION_HINT_OVERRIDES[m.id];
+    const c=m.check||{};
+    const skill=skillName(m.skill);
+    if(c.kind==='mcq') return [
+      `Сначала определи, какую именно идею навыка «${skill}» проверяет вопрос. Не выбирай вариант только по знакомому слову.`,
+      'Отбрось варианты, которые относятся к другому протоколу, уровню или назначению. Обычно после этого остаётся 1–2 кандидата.',
+      `Сравни оставшиеся варианты с целью миссии «${m.title}»: какой из них прямо решает описанную задачу?`
+    ];
+    if(c.kind==='short') return [
+      `Здесь нужен короткий термин, последовательность или команда из навыка «${skill}». Вспомни не формулировку, а действие.`,
+      `Посмотри на контекст миссии «${m.title}»: какая команда/последовательность использовалась бы именно на указанной платформе или протоколе?`,
+      'Проверь порядок, написание технических сокращений и разделители. Смысл важнее регистра букв, но сами protocol keywords должны быть точными.'
+    ];
+    if(c.kind==='keywords'||c.kind==='explain') return [
+      `Ответь своими словами на два вопроса: что это делает и зачем это нужно в теме «${skill}»?`,
+      'Добавь контекст: где это происходит — на хосте, в локальной сети, между сетями или на уровне веб-приложения?',
+      'Проверь, описал ли ты механизм, а не только дал определение. Одно предложение «что», второе — «как/почему».'
+    ];
+    if(c.kind==='report') return [
+      'Структурируй ответ: observation → evidence → impact → recommendation.',
+      'Не ограничивайся названием проблемы: укажи, что именно ты наблюдал и почему это важно.',
+      'Заверши конкретным следующим шагом или remediation, не придумывая фактов, которых не видел.'
+    ];
+    return [
+      `Сфокусируйся на навыке «${skill}» и сформулируй, что именно требуется получить в конце миссии.`,
+      'Разбей задачу на input → действие → expected output. Это часто сразу показывает правильное направление.',
+      'Сверь свой ответ с briefing: не добавляй лишних предположений и проверь ключевые технические термины.'
+    ];
+  }
+
   function localHintText(m,level){
-    if(level<=0) return `Сфокусируйся на навыке «${skillName(m.skill)}» и на ключевых словах вопроса. Не ищи точное совпадение — восстанови идею своими словами.`;
-    const item=m.body?.[Math.min(level-1,(m.body?.length||1)-1)];
-    return item||'Разбей вопрос на маленькие части и исключи варианты, которые относятся к другому уровню/протоколу.';
+    return progressiveHints(m)[Math.max(0,Math.min(MAX_MISSION_HINTS-1,level))];
+  }
+  function renderStoredHints(m){
+    const used=Math.min(MAX_MISSION_HINTS,Number(state.missionHints[m.id]||0));
+    return Array.from({length:used},(_,i)=>`<div class="hint-box"><b>Hint ${i+1}</b><br>${escapeHtml(localHintText(m,i))}</div>`).join('');
   }
   function addLocalHint(m,root){
-    const used=Number(state.missionHints[m.id]||0);
+    const used=Math.min(MAX_MISSION_HINTS,Number(state.missionHints[m.id]||0));
+    if(used>=MAX_MISSION_HINTS){toast('Все 3 hints уже использованы');updateHintButtons(m,root);return;}
     state.missionHints[m.id]=used+1; saveState();
-    const box=root.querySelector('[data-hints-area]'); const h=document.createElement('div');h.className='hint-box';h.innerHTML=`<b>Hint ${used+1}</b><br>${escapeHtml(localHintText(m,used))}`;box?.appendChild(h);
+    const box=root.querySelector('[data-hints-area]');
+    const h=document.createElement('div');h.className='hint-box';h.innerHTML=`<b>Hint ${used+1}</b><br>${escapeHtml(localHintText(m,used))}`;box?.appendChild(h);
     updateHintButtons(m,root);
+  }
+  function answerRevealHtml(m){
+    const c=m.check||{};
+    let answer='';
+    if(c.kind==='mcq') answer=c.options?.[c.correct]||'';
+    else if(c.kind==='short') answer=c.answers?.[0]||'';
+    if(answer){
+      return `<div class="answer-reveal"><div class="learning-label">ANSWER REVEALED</div><div class="revealed-answer">${escapeHtml(answer)}</div><p class="muted small">Mastery за эту попытку будет ограничен, потому что ответ уже был показан.</p><div class="learning-box compact"><div class="learning-label">WHY / NOTES</div><ul>${(m.body||[]).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div><button type="button" class="secondary-btn" data-quick-retry>Quick retry without looking</button></div>`;
+    }
+    return `<div class="answer-reveal"><div class="learning-label">EXPECTED CONCEPTS REVEALED</div><p class="muted">Для открытого ответа нет одной магической строки. Ниже — идеи, которые должен покрывать хороший ответ.</p><div class="learning-box compact"><ul>${(m.body||[]).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div><p class="muted small">Mastery за эту попытку будет ограничен, потому что rubric уже был показан.</p><button type="button" class="secondary-btn" data-quick-retry>Quick retry without looking</button></div>`;
+  }
+  function bindQuickRetry(m,root){
+    root.querySelector('[data-quick-retry]')?.addEventListener('click',()=>{
+      const notes=root.querySelector('[data-study-notes]'); if(notes){notes.classList.add('hidden');notes.innerHTML='';}
+      root.querySelectorAll('input[name="missionAnswer"]').forEach(x=>x.checked=false);
+      const input=root.querySelector('[data-answer]'); if(input){input.value='';input.focus();}
+      showInlineCheck(root,'Quick retry: ответ скрыт. Попробуй восстановить его без подсказки.',true);
+      clearAppealArea(root);
+      updateHintButtons(m,root);
+    });
+  }
+  function revealAnswer(m,root){
+    if(Number(state.missionHints[m.id]||0)<MAX_MISSION_HINTS){toast('Сначала используй 3 hints');return;}
+    state.missionReveals[m.id]=true;
+    addReviewCardForSkill(m.skill,dateOffset(new Date(),1));
+    saveState();
+    const notes=root.querySelector('[data-study-notes]'); if(!notes)return;
+    notes.classList.remove('hidden');notes.innerHTML=answerRevealHtml(m);bindQuickRetry(m,root);updateHintButtons(m,root);
   }
   function revealStudyNotes(m,root,completed=false){
     const notes=root.querySelector('[data-study-notes]'); if(!notes)return;
     notes.classList.remove('hidden');
     notes.innerHTML=`<div class="learning-box"><div class="learning-label">${completed?'POST-MISSION NOTES':'STUDY NOTES'}</div><ul>${(m.body||[]).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>`;
-    const sb=root.querySelector('[data-show-notes]'); if(sb)sb.classList.add('hidden');
   }
   function updateHintButtons(m,root){
-    const attempts=Number(state.missionAttempts[m.id]||0),hints=Number(state.missionHints[m.id]||0);
-    const meta=root.querySelector('[data-hint-meta]');if(meta)meta.textContent=`Hints used: ${hints} • Attempts: ${attempts}`;
-    const show=root.querySelector('[data-show-notes]'); if(show)show.classList.toggle('hidden',attempts<2&&hints<2);
+    const attempts=Number(state.missionAttempts[m.id]||0),hints=Math.min(MAX_MISSION_HINTS,Number(state.missionHints[m.id]||0));
+    const dots='●'.repeat(hints)+'○'.repeat(MAX_MISSION_HINTS-hints);
+    const meta=root.querySelector('[data-hint-meta]');if(meta)meta.textContent=`Hints ${dots} ${hints}/${MAX_MISSION_HINTS} • Attempts: ${attempts}`;
+    const hintBtn=root.querySelector('[data-local-hint]');
+    if(hintBtn){hintBtn.disabled=hints>=MAX_MISSION_HINTS;hintBtn.textContent=hints>=MAX_MISSION_HINTS?'Hints exhausted':`💡 Hint ${hints}/${MAX_MISSION_HINTS}`;}
+    const show=root.querySelector('[data-show-answer]');
+    if(show){show.classList.toggle('hidden',hints<MAX_MISSION_HINTS);show.textContent=state.missionReveals[m.id]?'Show answer again':'👁 Show answer';}
   }
   function renderResources(m){
-    const list=missionResources(m); if(!list.length)return '';
+    const list=missionResources(m).slice(0,2); if(!list.length)return '';
     return `<div class="resource-panel"><div class="learning-label">LEARN MORE</div>${list.map(([name,url])=>`<a class="resource-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(name)} ↗</a>`).join('')}</div>`;
   }
   function renderGuidance(m,reviewOnly){
     if(reviewOnly||m.type==='learn') return `<div data-study-notes><div class="learning-box"><div class="learning-label">${reviewOnly?'REVIEW NOTES':'LEARNING NOTES'}</div><ul>${(m.body||[]).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div></div>`;
-    return `<div class="guidance-shell"><div class="guidance-head"><div><div class="learning-label">HINT SYSTEM</div><p class="muted">Study notes are hidden so the question does not reveal its own answer.</p></div><span class="chip" data-hint-meta>Hints used: ${Number(state.missionHints[m.id]||0)} • Attempts: ${Number(state.missionAttempts[m.id]||0)}</span></div><div data-hints-area class="hints-area"></div><div class="button-row hint-actions"><button type="button" class="secondary-btn" data-local-hint>Hint</button><button type="button" class="secondary-btn ai-btn-inline" data-ai-hint>✨ AI hint</button><button type="button" class="text-btn hidden" data-show-notes>Show study notes</button></div><div data-study-notes class="hidden"></div></div>`;
+    const hints=Math.min(MAX_MISSION_HINTS,Number(state.missionHints[m.id]||0));
+    const revealed=!!state.missionReveals[m.id];
+    return `<div class="guidance-shell"><div class="guidance-head"><div><div class="learning-label">HELP SYSTEM</div><p class="muted">До 3 progressive hints. После 3/3 можно сознательно открыть ответ. AI Hint удалён — AI используется как grading judge.</p></div><span class="chip" data-hint-meta>Hints ${'●'.repeat(hints)}${'○'.repeat(MAX_MISSION_HINTS-hints)} ${hints}/${MAX_MISSION_HINTS} • Attempts: ${Number(state.missionAttempts[m.id]||0)}</span></div><div data-hints-area class="hints-area">${renderStoredHints(m)}</div><div class="button-row hint-actions"><button type="button" class="secondary-btn" data-local-hint>💡 Hint ${hints}/${MAX_MISSION_HINTS}</button><button type="button" class="text-btn ${hints>=MAX_MISSION_HINTS?'':'hidden'}" data-show-answer>${revealed?'Show answer again':'👁 Show answer'}</button></div><div data-study-notes class="${revealed?'':'hidden'}">${revealed?answerRevealHtml(m):''}</div></div>`;
   }
 
   function openMission(m,reviewOnly=false){
@@ -523,19 +747,25 @@
     content.innerHTML=`
       <p class="muted tiny">${reviewOnly?'MISSION REVIEW':'MISSION BRIEFING'} • ${escapeHtml(moduleById(m.module)?.title||m.module)}</p>
       <h2>${escapeHtml(m.title)}</h2>
-      <div class="quest-meta"><span class="tag type-tag">${missionTypeLabel(m.type)}</span><span class="tag">${escapeHtml(skillName(m.skill))}</span><span class="tag xp-tag">+${m.xp} XP</span><span class="tag">≈ ${m.duration} min</span>${aiReady()?'<span class="tag ai-tag">✨ AI ready</span>':''}</div>
+      <div class="quest-meta"><span class="tag type-tag">${missionTypeLabel(m.type)}</span><span class="tag">${escapeHtml(skillName(m.skill))}</span><span class="tag xp-tag">+${m.xp} XP</span><span class="tag">≈ ${m.duration} min</span>${aiReady()?'<span class="tag ai-tag">⚖️ AI judge ready</span>':''}</div>
       <div class="mission-brief"><p>${escapeHtml(m.briefing)}</p></div>
       ${renderGuidance(m,reviewOnly)}
       ${renderResources(m)}
       <div class="timer-row"><span class="muted">Focus timer</span><span class="focus-timer" data-focus-timer>00:00</span></div>
-      <div class="mission-check">${reviewOnly?'<div class="check-result good">Mission already completed. Use this screen as a refresher.</div>':renderMissionCheck(m)}</div>
+      <div class="mission-check">${reviewOnly?'<div class="check-result good">Mission already completed. Use this screen as a refresher.</div>':`${renderMissionCheck(m)}<div data-feedback-area></div><div data-appeal-area></div>`}</div>
       <label class="field-label" style="margin-top:14px">Mission note<textarea data-mission-note rows="4" placeholder="Что запомнить? Не сохраняй passwords/tokens/API keys.">${escapeHtml(savedNote)}</textarea></label>
       <div class="button-row" style="margin-top:10px"><button type="button" class="secondary-btn" data-save-note>Save note</button>${reviewOnly?'':`<button type="button" class="primary-btn" data-complete-mission>Verify & complete</button>`}</div>`;
     content.querySelector('[data-save-note]').onclick=()=>{state.notes[m.id]=content.querySelector('[data-mission-note]').value.trim();saveState();renderStats();toast('Note saved');};
     content.querySelector('[data-local-hint]')?.addEventListener('click',()=>addLocalHint(m,content));
-    content.querySelector('[data-ai-hint]')?.addEventListener('click',()=>requestAiHint(m,content));
-    content.querySelector('[data-show-notes]')?.addEventListener('click',()=>{state.missionHints[m.id]=(state.missionHints[m.id]||0)+1;saveState();revealStudyNotes(m,content,false);updateHintButtons(m,content);});
+    content.querySelector('[data-show-answer]')?.addEventListener('click',()=>revealAnswer(m,content));
+    if(state.missionReveals[m.id]) bindQuickRetry(m,content);
     const complete=content.querySelector('[data-complete-mission]'); if(complete) complete.onclick=()=>completeMission(m,content);
+    const onAnswerChanged=()=>{
+      const last=content.dataset.lastRejectedFingerprint||'';
+      if(last && appealFingerprint(m,content)!==last) clearAppealArea(content);
+    };
+    content.querySelector('[data-answer]')?.addEventListener('input',onAnswerChanged);
+    content.querySelectorAll('input[name="missionAnswer"]').forEach(x=>x.addEventListener('change',onAnswerChanged));
     updateHintButtons(m,content);
     document.getElementById('missionDialog').showModal();
     if(!reviewOnly) startMissionTimer(); else {missionOpenedAt=null;focusSeconds=0;}
@@ -648,9 +878,13 @@
   function renderReviewCard(card,scheduled){
     const area=document.getElementById('reviewArea'); let attempts=0;
     area.innerHTML=`<div class="review-question"><p class="muted tiny">${scheduled?'DUE REVIEW':'PRACTICE'} • ${escapeHtml(skillName(card.skill))}</p><h3>${escapeHtml(card.q)}</h3>${card.options.map((o,i)=>`<label class="option"><input type="radio" name="reviewAnswer" value="${i}"><span>${escapeHtml(o)}</span></label>`).join('')}<div id="reviewHint"></div><div id="reviewResult"></div><div class="button-row"><button id="submitReview" class="primary-btn">Check answer</button><button id="reviewHintBtn" class="secondary-btn" type="button">Hint</button><button id="showReviewAnswer" class="text-btn hidden" type="button">Show answer</button></div></div>`;
+    let reviewHintUsed=false;
     const hint=()=>{
-      const correct=card.options[card.correct];const clue=correct.length<=3?`Правильный вариант связан с базовым определением навыка «${skillName(card.skill)}».`:`Правильный вариант начинается с «${correct.slice(0,1)}» и относится к «${skillName(card.skill)}».`;
-      area.querySelector('#reviewHint').innerHTML=`<div class="hint-box">${escapeHtml(clue)}</div>`;
+      if(reviewHintUsed)return;
+      reviewHintUsed=true;
+      const correct=card.options[card.correct];const clue=correct.length<=3?`Подумай о базовом определении навыка «${skillName(card.skill)}».`:`Сфокусируйся на назначении термина в навыке «${skillName(card.skill)}», а не на знакомом звучании варианта.`;
+      area.querySelector('#reviewHint').innerHTML=`<div class="hint-box"><b>Review hint 1/1</b><br>${escapeHtml(clue)}</div>`;
+      const btn=area.querySelector('#reviewHintBtn');btn.disabled=true;btn.textContent='Hint used';
     };
     area.querySelector('#reviewHintBtn').onclick=hint;
     area.querySelector('#showReviewAnswer').onclick=()=>{area.querySelector('#reviewResult').innerHTML=`<div class="review-result bad">Ответ: <b>${escapeHtml(card.options[card.correct])}</b>. Карточка вернётся завтра.</div>`;if(scheduled){const r=state.review[card.id]||{stage:0};r.stage=0;r.due=dateOffset(new Date(),1);r.last=today();state.review[card.id]=r;}saveState();};
